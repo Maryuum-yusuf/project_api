@@ -28,8 +28,8 @@ def download_model():
 download_model()
 
 # Kadib load garee tokenizer iyo model
-tokenizer = MarianTokenizer.from_pretrained(model_dir, local_files_only=True, source_spm='source.spm', target_spm='target.spm')
-model = TFMarianMTModel.from_pretrained(model_dir, local_files_only=True, from_pt=True)
+tokenizer = MarianTokenizer.from_pretrained(model_dir, local_files_only=True)
+model = TFMarianMTModel.from_pretrained(model_dir, local_files_only=True)
 
 # Flask app setup
 app = Flask(__name__)
