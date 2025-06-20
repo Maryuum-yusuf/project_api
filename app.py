@@ -1,9 +1,8 @@
 import os
-import requests
 import zipfile
+import gdown
 from flask import Flask, request, jsonify
 from transformers import MarianTokenizer, TFMarianMTModel
-from pathlib import Path
 
 model_dir = "./amiin_model"
 
@@ -11,11 +10,11 @@ def download_model():
     if not os.path.exists(model_dir) or not os.listdir(model_dir):
         print("Downloading model...")
         os.makedirs(model_dir, exist_ok=True)
-        url = "https://drive.google.com/uc?export=download&id=1hv3QH-WIMD47LRDSfALtBWg3tMEV1ZFH"
+        file_id = "1hv3QH-WIMD47LRDSfALtBWg3tMEV1ZFH"
+        url = f"https://drive.google.com/uc?id={file_id}"
         zip_path = os.path.join(model_dir, "model.zip")
-        r = requests.get(url)
-        with open(zip_path, "wb") as f:
-            f.write(r.content)
+        gdown.download(url, zip_path, quiet=False)
+
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
             zip_ref.extractall(model_dir)
         os.remove(zip_path)
@@ -25,21 +24,10 @@ def download_model():
 
 download_model()
 
-# Specify spm paths
-source_spm = str(Path(model_dir) / "source.spm")
-target_spm = str(Path(model_dir) / "target.spm")
-
 # Load tokenizer and model
-tokenizer = MarianTokenizer.from_pretrained(
-    model_dir,
-    local_files_only=True,
-    source_spm=source_spm,
-    target_spm=target_spm
-)
-
+tokenizer = MarianTokenizer.from_pretrained(model_dir, local_files_only=True)
 model = TFMarianMTModel.from_pretrained(model_dir, local_files_only=True)
 
-# Flask app
 app = Flask(__name__)
 
 @app.route("/translate", methods=["POST"])
