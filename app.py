@@ -4,8 +4,10 @@ import tensorflow as tf
 
 # Load the model from local folder
 model_path = "./amiin_model"
-tokenizer = MarianTokenizer.from_pretrained(model_path)
-model = TFMarianMTModel.from_pretrained(model_path)
+tokenizer = MarianTokenizer.from_pretrained(model_path, local_files_only=True)
+
+# Load model-ka (TF model) local
+model = TFMarianMTModel.from_pretrained(model_path, local_files_only=True, from_pt=True) 
 
 # Setup Flask
 app = Flask(__name__)
