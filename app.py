@@ -3,6 +3,7 @@ import requests
 import zipfile
 from flask import Flask, request, jsonify
 from transformers import MarianTokenizer, TFMarianMTModel
+from pathlib import Path
 
 model_dir = "./amiin_model"
 
@@ -24,10 +25,21 @@ def download_model():
 
 download_model()
 
-# Load model
-tokenizer = MarianTokenizer.from_pretrained(model_dir, local_files_only=True)
+# Specify spm paths
+source_spm = str(Path(model_dir) / "source.spm")
+target_spm = str(Path(model_dir) / "target.spm")
+
+# Load tokenizer and model
+tokenizer = MarianTokenizer.from_pretrained(
+    model_dir,
+    local_files_only=True,
+    source_spm=source_spm,
+    target_spm=target_spm
+)
+
 model = TFMarianMTModel.from_pretrained(model_dir, local_files_only=True)
 
+# Flask app
 app = Flask(__name__)
 
 @app.route("/translate", methods=["POST"])
