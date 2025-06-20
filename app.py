@@ -6,14 +6,13 @@ from transformers import MarianTokenizer, TFMarianMTModel
 
 model_dir = "./amiin_model"
 
-# Download model if folder is missing or empty
 def download_model():
     if not os.path.exists(model_dir) or not os.listdir(model_dir):
         print("Downloading model...")
         os.makedirs(model_dir, exist_ok=True)
         url = "https://drive.google.com/uc?export=download&id=1hv3QH-WIMD47LRDSfALtBWg3tMEV1ZFH"
-        r = requests.get(url)
         zip_path = os.path.join(model_dir, "model.zip")
+        r = requests.get(url)
         with open(zip_path, "wb") as f:
             f.write(r.content)
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
@@ -25,11 +24,10 @@ def download_model():
 
 download_model()
 
-# ✅ Load tokenizer and model properly
+# Load model
 tokenizer = MarianTokenizer.from_pretrained(model_dir, local_files_only=True)
 model = TFMarianMTModel.from_pretrained(model_dir, local_files_only=True)
 
-# Flask setup
 app = Flask(__name__)
 
 @app.route("/translate", methods=["POST"])
