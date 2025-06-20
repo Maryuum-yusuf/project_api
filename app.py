@@ -11,7 +11,7 @@ def download_model():
         print("Downloading model...")
         os.makedirs(model_dir, exist_ok=True)
         # Halkan geli Google Drive ama link kale oo file zipped ah oo model-kaaga ah
-        url = "https://drive.google.com/drive/folders/18hU-XeKOvggmTVyKuG2lA76xQUGISj5-?usp=sharing"
+        url = "https://drive.google.com/uc?export=download&id=1hv3QH-WIMD47LRDSfALtBWg3tMEV1ZFH"
         r = requests.get(url)
         zip_path = os.path.join(model_dir, "model.zip")
         with open(zip_path, "wb") as f:
