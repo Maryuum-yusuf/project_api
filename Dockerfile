@@ -1,27 +1,23 @@
-# Base image
-FROM python:3.10-slim
+# Isticmaal Python 3.10.0 base image
+FROM python:3.10.0-slim
 
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    git \
-    wget \
-    unzip \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy requirements file
-COPY requirements.txt .
-
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy app code
+# Nuqul file-yada mashruuca
 COPY . .
 
-# Expose port
+# Install dependencies
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir \
+        flask \
+        transformers \
+        tensorflow-cpu==2.19.0 \
+        sentencepiece \
+        requests
+
+# Expose port Flask default
 EXPOSE 5000
 
-# Run app
+# Run Flask app
 CMD ["python", "app.py"]
