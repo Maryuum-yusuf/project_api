@@ -5,8 +5,9 @@ WORKDIR /app
 COPY . .
 
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip uninstall -y keras tensorflow && \
+    pip uninstall -y keras tensorflow numpy && \
     pip install --no-cache-dir \
+        numpy==1.24.4 \
         tensorflow-cpu==2.10.1 \
         tf-keras \
         flask \
