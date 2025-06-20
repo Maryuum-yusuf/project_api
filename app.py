@@ -1,15 +1,37 @@
+import os
+import requests
+import zipfile
 from flask import Flask, request, jsonify
 from transformers import MarianTokenizer, TFMarianMTModel
-import tensorflow as tf
 
-# Load the model from local folder
-model_path = "./amiin_model"
-tokenizer = MarianTokenizer.from_pretrained(model_path, local_files_only=True)
+model_dir = "./amiin_model"
 
-# Load model-ka (TF model) local
-model = TFMarianMTModel.from_pretrained(model_path, local_files_only=True, from_pt=True) 
+def download_model():
+    if not os.path.exists(model_dir) or not os.listdir(model_dir):
+        print("Downloading model...")
+        os.makedirs(model_dir, exist_ok=True)
+        # Halkan geli Google Drive ama link kale oo file zipped ah oo model-kaaga ah
+        url = "https://drive.google.com/drive/folders/18hU-XeKOvggmTVyKuG2lA76xQUGISj5-?usp=sharing"
+        r = requests.get(url)
+        zip_path = os.path.join(model_dir, "model.zip")
+        with open(zip_path, "wb") as f:
+            f.write(r.content)
+        # Unzip garee
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            zip_ref.extractall(model_dir)
+        os.remove(zip_path)
+        print("Model downloaded and extracted.")
+    else:
+        print("Model folder already exists and is not empty. Skipping download.")
 
-# Setup Flask
+# Marka hore soo dejiso model-ka haddii loo baahdo
+download_model()
+
+# Kadib load garee tokenizer iyo model
+tokenizer = MarianTokenizer.from_pretrained(model_dir, local_files_only=True)
+model = TFMarianMTModel.from_pretrained(model_dir, local_files_only=True, from_pt=True)
+
+# Flask app setup
 app = Flask(__name__)
 
 @app.route("/translate", methods=["POST"])
