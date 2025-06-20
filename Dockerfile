@@ -6,11 +6,11 @@ COPY . .
 
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir \
+        numpy==1.24.3 \
         flask \
         transformers \
         tensorflow-cpu==2.10.1 \
         sentencepiece \
-        requests \
         gdown
 
 EXPOSE 5000
