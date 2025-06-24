@@ -42,29 +42,6 @@ from datetime import datetime
 from dotenv import load_dotenv
 load_dotenv()
 
-import zipfile
-import requests
-import gdown
-
-def download_model():
-    model_dir = "amiin_model"
-    if not os.path.exists(model_dir):
-        print("📦 Downloading model...")
-
-        url = "https://drive.google.com/uc?id=1hv3QH-WIMD47LRDSfALtBWg3tMEV1ZFH"
-        output = "amiin_model.zip"
-        gdown.download(url, output, quiet=False)
-
-        print("✅ Model downloaded. Unzipping...")
-        with zipfile.ZipFile(output, 'r') as zip_ref:
-            zip_ref.extractall(".")
-        print("✅ Model extracted.")
-        os.remove(output)
-
-
-# 🔽 Call download before loading the model
-download_model()
-
 
 app = Flask(__name__)
 CORS(app)
