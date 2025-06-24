@@ -1,6 +1,9 @@
-# flask
-# transformers
-# tensorflow-cpu==2.10.1
-# sentencepiece
-# requests
+flask
+flask_cors
+transformers
+tensorflow-cpu==2.10.1
+sentencepiece
+requests
+flask_sqlalchemy
+psycopg2-binary
 
