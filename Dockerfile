@@ -5,13 +5,7 @@ WORKDIR /app
 COPY . .
 
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir \
-        numpy==1.24.3 \
-        flask \
-        transformers \
-        tensorflow-cpu==2.10.1 \
-        sentencepiece \
-        gdown
+    pip install --no-cache-dir -r requirements.txt
 
 EXPOSE 5000
 
