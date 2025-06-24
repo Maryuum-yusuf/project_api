@@ -44,27 +44,23 @@ load_dotenv()
 
 import zipfile
 import requests
+import gdown
 
 def download_model():
     model_dir = "amiin_model"
     if not os.path.exists(model_dir):
         print("📦 Downloading model...")
-        file_id = "1hv3QH-WIMD47LRDSfALtBWg3tMEV1ZFH"
-        url = f"https://drive.google.com/uc?export=download&id={file_id}"
-        output = "amiin_model.zip"
 
-        with requests.get(url, stream=True) as r:
-            with open(output, 'wb') as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
+        url = "https://drive.google.com/uc?id=1hv3QH-WIMD47LRDSfALtBWg3tMEV1ZFH"
+        output = "amiin_model.zip"
+        gdown.download(url, output, quiet=False)
 
         print("✅ Model downloaded. Unzipping...")
         with zipfile.ZipFile(output, 'r') as zip_ref:
             zip_ref.extractall(".")
         print("✅ Model extracted.")
-
         os.remove(output)
+
 
 # 🔽 Call download before loading the model
 download_model()
