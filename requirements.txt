@@ -7,5 +7,5 @@ sentencepiece
 requests
 flask_sqlalchemy
 psycopg2-binary
+python-dotenv
 gdown
-
