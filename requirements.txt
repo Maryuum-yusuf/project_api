@@ -9,3 +9,6 @@ flask_sqlalchemy
 psycopg2-binary
 python-dotenv
 gdown
+setuptools
+wheel
+
