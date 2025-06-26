@@ -132,9 +132,12 @@ def delete_favorite(entry_id):
 
 # ✅ Initialize
 
+    # ✅ Samee database table marka app la bilaabo
+with app.app_context():
+    db.create_all()
+
+# ✅ Local only: Orod server Flask haddii file-ka si toos ah loo ordayo
 if __name__ == "__main__":
-    with app.app_context():
-        db.create_all()
     app.run(host="0.0.0.0", port=5000, debug=True)
 
 # Load the model from local folder
