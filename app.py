@@ -12,10 +12,8 @@ CORS(app)
 
 # 🔗 PostgreSQL connection
 # beddel user, password, host, port, dbname haddii local tahay
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get(
-    'DATABASE_URL',
-    'postgresql://postgres:1234@localhost:5432/translate_db'
-)
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///translations.db'
+
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
@@ -131,6 +129,7 @@ def delete_favorite(entry_id):
     return jsonify({"message": "Removed from favorites"})
 
 # ✅ Initialize
+
 
     # ✅ Samee database table marka app la bilaabo
 with app.app_context():
