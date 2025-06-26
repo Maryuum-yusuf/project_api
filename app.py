@@ -10,9 +10,11 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app)
 
-# 🔗 PostgreSQL connection
-# beddel user, password, host, port, dbname haddii local tahay
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///translations.db'
+
+basedir = os.path.abspath(os.path.dirname(__file__))
+db_path = os.path.join(basedir, 'translations.db')
+app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path}'
+
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
