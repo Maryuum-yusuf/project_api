@@ -12,8 +12,10 @@ CORS(app)
 
 
 # ✅ DB path gudaha folder la oggol yahay
-db_path = "/tmp/translations.db"
-app.config['SQLALCHEMY_DATABASE_URI'] = f"sqlite:///{db_path}"
+basedir = os.path.abspath(os.path.dirname(__file__))  # 👈 folderka app.py ku jiro
+db_path = os.path.join(basedir, 'translations.db')
+
+app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path}'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
