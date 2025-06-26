@@ -1,4 +1,4 @@
-FROM python:3.10-slim
+FROM python:3.10.0-slim
 
 WORKDIR /app
 
@@ -18,4 +18,4 @@ ENV PORT=7860
 EXPOSE $PORT
 
 # Start with uvicorn
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7860"]
+CMD ["gunicorn", "--bind", "0.0.0.0:7860", "app:app"]
