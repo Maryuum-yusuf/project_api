@@ -11,8 +11,8 @@ app = Flask(__name__)
 CORS(app)
 
 
-# ✅ DB path gudaha folder la oggol yahay
-db_path = os.path.join("/tmp", "translations.db")
+# ✅ DB path Windows-friendly
+db_path = os.path.join(os.getcwd(), "translations.db")
 app.config['SQLALCHEMY_DATABASE_URI'] = f"sqlite:///{db_path}"
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
