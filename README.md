@@ -1,2 +1,10 @@
-## Model
-Faylka model-ka waa la heli karaa halkan: [Download Model](https://drive.google.com/drive/folders/18hU-XeKOvggmTVyKuG2lA76xQUGISj5-?usp=sharing)
+
+---
+title: Somali Translator
+emoji: 🏢
+colorFrom: red
+colorTo: red
+sdk: docker
+pinned: false
+license: apache-2.0
+---
