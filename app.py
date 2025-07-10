@@ -5,6 +5,10 @@ from transformers import MarianTokenizer, TFMarianMTModel
 from pymongo import MongoClient
 from datetime import datetime
 from dotenv import load_dotenv
+from datetime import datetime
+import pytz
+
+
 
 load_dotenv()
 
@@ -39,17 +43,25 @@ def translate():
         outputs = model.generate(**inputs)
         translated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
 
+        # ✅ Define Somalia timezone
+        somalia_tz = pytz.timezone('Africa/Mogadishu')
+
         # ✅ Save to MongoDB
         new_entry = {
             "original_text": input_text,
             "translated_text": translated_text,
-            "timestamp": datetime.utcnow(),
+            "timestamp": datetime.now(somalia_tz).isoformat(),
             "is_favorite": False
         }
         result = translations.insert_one(new_entry)
         new_entry["_id"] = str(result.inserted_id)
 
-        return jsonify({"translation": translated_text})
+        # return jsonify({"translation": translated_text})
+        return jsonify({
+    "translated_text": translated_text,
+    "id": str(result.inserted_id)  # ✅ Return MongoDB document ID
+})
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -58,8 +70,9 @@ def get_history():
     docs = list(translations.find().sort("timestamp", -1))
     for doc in docs:
         doc["_id"] = str(doc["_id"])
-        doc["timestamp"] = doc["timestamp"].isoformat()
+        doc["timestamp"] = str(doc["timestamp"])  # ✅ no isoformat needed
     return jsonify(docs)
+
 
 @app.route("/favorite", methods=["POST"])
 def mark_favorite():
@@ -76,7 +89,7 @@ def get_favorites():
     docs = list(translations.find({"is_favorite": True}).sort("timestamp", -1))
     for doc in docs:
         doc["_id"] = str(doc["_id"])
-        doc["timestamp"] = doc["timestamp"].isoformat()
+        doc["timestamp"] = doc["timestamp"]
     return jsonify(docs)
 
 @app.route("/history/<entry_id>", methods=["DELETE"])
