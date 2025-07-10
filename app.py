@@ -1,38 +1,3 @@
-# import os
-# from flask import Flask, request, jsonify
-# from transformers import MarianTokenizer, TFMarianMTModel
-# from flask_cors import CORS  # 🔥 Ku dar
-
-# app = Flask(__name__)
-# CORS(app)  # 🔥 Waxay oggolaanaysaa in loo soo diro codsi meel kasta
-
-# model_dir = "./amiin_model"
-
-# # Load model and tokenizer
-# tokenizer = MarianTokenizer.from_pretrained(model_dir, local_files_only=True)
-# model = TFMarianMTModel.from_pretrained(model_dir, local_files_only=True)
-
-# @app.route("/translate", methods=["POST"])
-# def translate():
-#     data = request.get_json()
-#     input_text = data.get("text", "")
-
-#     if not input_text.strip():
-#         return jsonify({"translation": "No input text provided."})
-
-#     try:
-#         inputs = tokenizer(input_text, return_tensors="tf", padding=True, truncation=True)
-#         outputs = model.generate(**inputs)
-#         translated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
-#         return jsonify({"translation": translated_text})
-#     except Exception as e:
-#         return jsonify({"error": str(e)}), 500
-
-# if __name__ == "__main__":
-#     app.run(debug=True)
-
-
-
 import os
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -41,7 +6,6 @@ from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 from dotenv import load_dotenv
 load_dotenv()
-
 
 app = Flask(__name__)
 CORS(app)
@@ -172,3 +136,24 @@ if __name__ == "__main__":
     with app.app_context():
         db.create_all()
     app.run(host="0.0.0.0", port=5000, debug=True)
+
+# Load the model from local folder
+model_path = "./amiin_model"
+tokenizer = MarianTokenizer.from_pretrained(model_path)
+model = TFMarianMTModel.from_pretrained(model_path)
+
+# Setup Flask
+app = Flask(__name__)
+
+@app.route("/translate", methods=["POST"])
+def translate():
+    data = request.get_json()
+    input_text = data["text"]
+    inputs = tokenizer(input_text, return_tensors="tf", padding=True, truncation=True)
+    outputs = model.generate(**inputs)
+    translated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    return jsonify({"translation": translated_text})
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
+
