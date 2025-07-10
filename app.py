@@ -7,11 +7,17 @@ from datetime import datetime
 from dotenv import load_dotenv
 load_dotenv()
 
+<<<<<<< HEAD
 app = Flask(__name__)
 CORS(app)
 
 # ✅ Don't use app.instance_path at all!
 db_path = "translations.db"
+=======
+
+app = Flask(__name__, instance_path=os.getcwd())  # ✅ instance_path = galka hadda lagu jiro
+db_path = os.path.join(app.instance_path, "translations.db")  
+>>>>>>> d7c0c25 (Fix database init for Gunicorn)
 app.config['SQLALCHEMY_DATABASE_URI'] = f"sqlite:///{db_path}"
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
