@@ -2,41 +2,30 @@ import os
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from transformers import MarianTokenizer, TFMarianMTModel
-from flask_sqlalchemy import SQLAlchemy
+from pymongo import MongoClient
 from datetime import datetime
 from dotenv import load_dotenv
-load_dotenv()
 
+load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
 
+# ✅ MongoDB setup
+mongo_uri = "mongodb+srv://maryama:1234@cluster0.stv0d.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+client = MongoClient(mongo_uri)
+db = client["somali_translator_db"]
+translations = db["translations"]
 
-db = SQLAlchemy(app)
-
-# 📦 Load model
+# ✅ Load translation model
 model_dir = "./amiin_model"
 tokenizer = MarianTokenizer.from_pretrained(model_dir, local_files_only=True)
 model = TFMarianMTModel.from_pretrained(model_dir, local_files_only=True)
 
-# 📄 Translation Model
-class Translation(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    original_text = db.Column(db.Text, nullable=False)
-    translated_text = db.Column(db.Text, nullable=False)
-    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
-    is_favorite = db.Column(db.Boolean, default=False)
+@app.route("/")
+def home():
+    return "🚀 Somali Translator API waa socda oo MongoDB waa ku xiran!"
 
-    def to_dict(self):
-        return {
-            "id": self.id,
-            "original_text": self.original_text,
-            "translated_text": self.translated_text,
-            "timestamp": self.timestamp.isoformat(),
-            "is_favorite": self.is_favorite
-        }
-
-# 🔁 Translate route
 @app.route("/translate", methods=["POST"])
 def translate():
     data = request.get_json()
@@ -50,93 +39,72 @@ def translate():
         outputs = model.generate(**inputs)
         translated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
 
-        # Save to history
-        new_entry = Translation(
-            original_text=input_text,
-            translated_text=translated_text
-        )
-        db.session.add(new_entry)
-        db.session.commit()
+        # ✅ Save to MongoDB
+        new_entry = {
+            "original_text": input_text,
+            "translated_text": translated_text,
+            "timestamp": datetime.utcnow(),
+            "is_favorite": False
+        }
+        result = translations.insert_one(new_entry)
+        new_entry["_id"] = str(result.inserted_id)
 
         return jsonify({"translation": translated_text})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# 📜 Get all history
 @app.route("/history", methods=["GET"])
 def get_history():
-    entries = Translation.query.order_by(Translation.timestamp.desc()).all()
-    return jsonify([entry.to_dict() for entry in entries])
+    docs = list(translations.find().sort("timestamp", -1))
+    for doc in docs:
+        doc["_id"] = str(doc["_id"])
+        doc["timestamp"] = doc["timestamp"].isoformat()
+    return jsonify(docs)
 
-# 🌟 Mark favorite
 @app.route("/favorite", methods=["POST"])
 def mark_favorite():
     data = request.get_json()
     entry_id = data.get("id")
-
-    entry = Translation.query.get(entry_id)
-    if not entry:
-        return jsonify({"error": "Translation not found"}), 404
-
-    entry.is_favorite = True
-    db.session.commit()
+    from bson import ObjectId
+    result = translations.update_one({"_id": ObjectId(entry_id)}, {"$set": {"is_favorite": True}})
+    if result.modified_count == 0:
+        return jsonify({"error": "Not found"}), 404
     return jsonify({"message": "Marked as favorite"})
 
-# ⭐ Get all favorites
 @app.route("/favorites", methods=["GET"])
 def get_favorites():
-    entries = Translation.query.filter_by(is_favorite=True).order_by(Translation.timestamp.desc()).all()
-    return jsonify([entry.to_dict() for entry in entries])
+    docs = list(translations.find({"is_favorite": True}).sort("timestamp", -1))
+    for doc in docs:
+        doc["_id"] = str(doc["_id"])
+        doc["timestamp"] = doc["timestamp"].isoformat()
+    return jsonify(docs)
 
-
-# 🗑️ Delete single history item
-@app.route("/history/<int:entry_id>", methods=["DELETE"])
+@app.route("/history/<entry_id>", methods=["DELETE"])
 def delete_history(entry_id):
-    entry = Translation.query.get(entry_id)
-    if not entry:
-        return jsonify({"error": "Translation not found"}), 404
-    db.session.delete(entry)
-    db.session.commit()
+    from bson import ObjectId
+    result = translations.delete_one({"_id": ObjectId(entry_id)})
+    if result.deleted_count == 0:
+        return jsonify({"error": "Not found"}), 404
     return jsonify({"message": "Deleted"})
-
-# 🗑️ Delete all histor
 
 @app.route("/history", methods=["DELETE"])
 def delete_all_history():
-    db.session.query(Translation).delete()
-    db.session.commit()
+    translations.delete_many({})
     return jsonify({"message": "All history deleted"})
 
-# 🗑️ Delete all favorite
 @app.route("/favorites", methods=["DELETE"])
 def delete_all_favorites():
-    db.session.query(Translation).filter_by(is_favorite=True).delete()
-    db.session.commit()
-    return jsonify({"message": "All favorites deleted"})
+    translations.update_many({"is_favorite": True}, {"$set": {"is_favorite": False}})
+    return jsonify({"message": "All favorites unmarked"})
 
-# 🗑️ Delete single favorites
-@app.route("/favorites/<int:entry_id>", methods=["DELETE"])
-def delete_favorite(entry_id):      
-    entry = Translation.query.get(entry_id)
-    if not entry:
-        return jsonify({"error": "Translation not found"}), 404
-    entry.is_favorite = False
-    db.session.commit()
+@app.route("/favorites/<entry_id>", methods=["DELETE"])
+def delete_favorite(entry_id):
+    from bson import ObjectId
+    result = translations.update_one({"_id": ObjectId(entry_id)}, {"$set": {"is_favorite": False}})
+    if result.matched_count == 0:
+        return jsonify({"error": "Not found"}), 404
     return jsonify({"message": "Removed from favorites"})
 
-# ✅ Initialize
-
-
-    # ✅ Samee database table marka app la bilaabo
-with app.app_context():
-    db.create_all()
-
-@app.route("/")
-def home():
-    return "App-ka Somali Translator wuu socdaa 🎉"
-
-
-# ✅ Local only: Orod server Flask haddii file-ka si toos ah loo ordayo
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
 
