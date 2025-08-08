@@ -7,28 +7,36 @@ from datetime import datetime
 from dotenv import load_dotenv
 from datetime import datetime
 import pytz
-
+from flask_bcrypt import Bcrypt
+import jwt
+from routes.auth_routes import auth_routes 
+from routes.user_routes import user_routes
 
 
 load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
+bcrypt = Bcrypt(app)
 
-# ✅ MongoDB setup
-mongo_uri = "mongodb+srv://maryama:1234@cluster0.stv0d.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+
+app.register_blueprint(auth_routes)
+app.register_blueprint(user_routes)
+#MongoDB setup
+mongo_uri = "mongodb://localhost:27017/"
 client = MongoClient(mongo_uri)
 db = client["somali_translator_db"]
 translations = db["translations"]
+users = db["users"] 
 
-# ✅ Load translation model
+#Load translation model
 model_dir = "./amiin_model"
 tokenizer = MarianTokenizer.from_pretrained(model_dir, local_files_only=True)
 model = TFMarianMTModel.from_pretrained(model_dir, local_files_only=True)
 
 @app.route("/")
 def home():
-    return "🚀 Somali Translator API waa socda oo MongoDB waa ku xiran!"
+    return "Somali Translator API waa socda oo MongoDB waa ku xiran!"
 
 @app.route("/translate", methods=["POST"])
 def translate():
@@ -43,10 +51,10 @@ def translate():
         outputs = model.generate(**inputs)
         translated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
 
-        # ✅ Define Somalia timezone
+        # Define Somalia timezone
         somalia_tz = pytz.timezone('Africa/Mogadishu')
 
-        # ✅ Save to MongoDB
+        # Save to MongoDB
         new_entry = {
             "original_text": input_text,
             "translated_text": translated_text,
@@ -59,7 +67,7 @@ def translate():
         # return jsonify({"translation": translated_text})
         return jsonify({
     "translated_text": translated_text,
-    "id": str(result.inserted_id)  # ✅ Return MongoDB document ID
+    "id": str(result.inserted_id)  # Return MongoDB document ID
 })
 
     except Exception as e:
@@ -70,7 +78,7 @@ def get_history():
     docs = list(translations.find().sort("timestamp", -1))
     for doc in docs:
         doc["_id"] = str(doc["_id"])
-        doc["timestamp"] = str(doc["timestamp"])  # ✅ no isoformat needed
+        doc["timestamp"] = str(doc["timestamp"])  # no isoformat needed
     return jsonify(docs)
 
 
@@ -120,24 +128,3 @@ def delete_favorite(entry_id):
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
-
-# Load the model from local folder
-model_path = "./amiin_model"
-tokenizer = MarianTokenizer.from_pretrained(model_path)
-model = TFMarianMTModel.from_pretrained(model_path)
-
-# Setup Flask
-app = Flask(__name__)
-
-@app.route("/translate", methods=["POST"])
-def translate():
-    data = request.get_json()
-    input_text = data["text"]
-    inputs = tokenizer(input_text, return_tensors="tf", padding=True, truncation=True)
-    outputs = model.generate(**inputs)
-    translated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    return jsonify({"translation": translated_text})
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
-

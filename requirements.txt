@@ -11,3 +11,7 @@ python-dotenv
 gdown
 setuptools
 wheel
+flask-bcrypt
+python-dotenv
+PyJWT
+pymongo
