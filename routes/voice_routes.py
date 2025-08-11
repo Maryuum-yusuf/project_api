@@ -3,259 +3,284 @@ from bson import ObjectId
 from pymongo import MongoClient
 from datetime import datetime
 from middlewares.auth_decorator import token_required
+import base64
 import os
-from werkzeug.utils import secure_filename
-import pytz
-from routes.language_detection import somali_detector
 
 client = MongoClient("mongodb://localhost:27017/")
 db = client["somali_translator_db"]
-voice_translations = db["voice_translations"]
-translations = db["translations"]
+voice_recordings = db["voice_recordings"]
 
 voice_routes = Blueprint("voice_routes", __name__)
 
-
-
-@voice_routes.route("/voice/translate", methods=["POST"])
+@voice_routes.route("/voice/save", methods=["POST"])
 @token_required
-def voice_translate():
-    claims = getattr(request, "user", {}) or {}
-    user_id = claims.get("user_id")
-    if not user_id:
-        return jsonify({"error": "Invalid token payload"}), 403
-
-    # Check if audio file is present (recorded audio from frontend)
-    if 'audio' not in request.files:
-        return jsonify({"error": "No audio recording provided"}), 400
-    
-    file = request.files['audio']
-    if file.filename == '':
-        return jsonify({"error": "No audio recording selected"}), 400
-    
-    if not allowed_file(file.filename):
-        return jsonify({"error": "Invalid file type. Allowed: wav, mp3, m4a, flac, ogg, webm"}), 400
-
-    # Check if transcribed_text is provided (from frontend speech recognition)
-    transcribed_text = request.form.get('transcribed_text')
-    if not transcribed_text:
-        return jsonify({"error": "No transcribed text provided. Please transcribe the audio first."}), 400
-
+def save_voice_recording():
+    """Save a voice recording for the authenticated user."""
     try:
-        # Save recorded audio file to database storage
-        filename = secure_filename(file.filename)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        unique_filename = f"{timestamp}_{filename}"
+        claims = getattr(request, "user", {}) or {}
+        user_id = claims.get("user_id")
+        if not user_id:
+            return jsonify({"error": "Invalid token payload"}), 403
+
+        data = request.get_json() or {}
+        audio_data = data.get("audio_data")  # Base64 encoded audio
+        duration = data.get("duration", 0)  # Duration in seconds
+        language = data.get("language", "Somali")  # Language of speech
+        transcription = data.get("transcription", "")  # Optional transcription
         
-        file_path = os.path.join(UPLOAD_FOLDER, unique_filename)
-        file.save(file_path)
+        if not audio_data:
+            return jsonify({"error": "Audio data is required"}), 400
 
-        # Detect language of the transcribed text
-        language_detection = somali_detector.detect_text_language(transcribed_text)
-        detected_language = language_detection['language']
-        language_confidence = language_detection['confidence']
-        detection_method = language_detection['method']
-
-        # Check if the transcribed text is Somali - if not, return error message
-        if detected_language != 'so' or language_confidence < 0.2:
-            # Clean up file since we won't be using it
-            if 'file_path' in locals() and os.path.exists(file_path):
-                os.remove(file_path)
-            return jsonify({
-                "error": "Qoraalka aad galisay ma aha afka Soomaaliga. Fadlan gali qoraal Soomaali ah.",
-                "language_detection": {
-                    "detected_language": detected_language,
-                    "language_confidence": language_confidence,
-                    "detection_method": detection_method,
-                    "is_somali": False
-                },
-              
-            }), 400
-
-        # Translate Somali text
-        from app import tokenizer, model
-        inputs = tokenizer(transcribed_text, return_tensors="tf", padding=True, truncation=True)
-        outputs = model.generate(**inputs)
-        translated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
-
-        # Define Somalia timezone
-        somalia_tz = pytz.timezone('Africa/Mogadishu')
-
-        # Save to voice_translations collection (both audio recording and translation)
-        voice_entry = {
+        # Create voice recording document
+        recording_doc = {
             "user_id": ObjectId(user_id),
-            "audio_filename": unique_filename,
-            "audio_path": file_path,
-            "transcribed_text": transcribed_text,  # Text from frontend speech recognition
-            "translated_text": translated_text,
-            "timestamp": datetime.now(somalia_tz).isoformat(),
-            "is_favorite": False,
-            "detected_language": detected_language,
-            "language_confidence": language_confidence,
-            "detection_method": detection_method
+            "audio_data": audio_data,
+            "duration": duration,
+            "language": language,
+            "transcription": transcription,
+            "timestamp": datetime.utcnow(),
+            "is_favorite": False
         }
+
+        result = voice_recordings.insert_one(recording_doc)
         
-        result = voice_translations.insert_one(voice_entry)
-        voice_entry["_id"] = str(result.inserted_id)
-
-        # Also save to regular translations collection for consistency
-        translation_entry = {
-            "user_id": ObjectId(user_id),
-            "original_text": transcribed_text,  # Transcribed text from frontend speech recognition
-            "translated_text": translated_text,
-            "timestamp": datetime.now(somalia_tz).isoformat(),
-            "is_favorite": False,
-            "source": "voice",
-            "voice_translation_id": result.inserted_id
-        }
-        translations.insert_one(translation_entry)
-
         return jsonify({
-            "message": "Voice recording and translation saved successfully",
-            "voice_translation_id": str(result.inserted_id),
-            "transcribed_text": transcribed_text,
-            "translated_text": translated_text,
-            "audio_filename": unique_filename,
-            "language_detection": {
-                "detected_language": detected_language,
-                "language_confidence": language_confidence,
-                "detection_method": detection_method,
-                "is_somali": detected_language == 'so'
-            }
+            "message": "Voice recording saved successfully",
+            "id": str(result.inserted_id),
+            "timestamp": recording_doc["timestamp"].isoformat()
         }), 200
 
     except Exception as e:
-        # Clean up file if error occurred
-        if 'file_path' in locals() and os.path.exists(file_path):
-            os.remove(file_path)
         return jsonify({"error": str(e)}), 500
 
-@voice_routes.route("/voice/history", methods=["GET"])
+@voice_routes.route("/voice/recordings", methods=["GET"])
 @token_required
-def get_voice_history():
-    claims = getattr(request, "user", {}) or {}
-    user_id = claims.get("user_id")
-    if not user_id:
-        return jsonify({"error": "Invalid token payload"}), 403
+def get_voice_recordings():
+    """Get all voice recordings for the authenticated user."""
+    try:
+        claims = getattr(request, "user", {}) or {}
+        user_id = claims.get("user_id")
+        if not user_id:
+            return jsonify({"error": "Invalid token payload"}), 403
 
-    page = int(request.args.get("page", 1))
-    limit = int(request.args.get("limit", 20))
-    skip = (page - 1) * limit
+        recordings = list(voice_recordings.find({"user_id": ObjectId(user_id)}).sort("timestamp", -1))
+        
+        for recording in recordings:
+            recording["_id"] = str(recording["_id"])
+            if isinstance(recording.get("user_id"), ObjectId):
+                recording["user_id"] = str(recording["user_id"])
+            if hasattr(recording.get("timestamp"), "isoformat"):
+                recording["timestamp"] = recording["timestamp"].isoformat()
 
-    # Get user's voice translations
-    user_voice_translations = list(voice_translations.find({"user_id": ObjectId(user_id)}).skip(skip).limit(limit).sort("timestamp", -1))
-    total_voice_translations = voice_translations.count_documents({"user_id": ObjectId(user_id)})
+        return jsonify(recordings), 200
 
-    for trans in user_voice_translations:
-        trans["_id"] = str(trans["_id"])
-        if isinstance(trans.get("user_id"), ObjectId):
-            trans["user_id"] = str(trans["user_id"])
-        if hasattr(trans.get("timestamp"), "isoformat"):
-            trans["timestamp"] = trans["timestamp"].isoformat()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-    return jsonify({
-        "voice_translations": user_voice_translations,
-        "total": total_voice_translations,
-        "page": page,
-        "limit": limit,
-        "pages": (total_voice_translations + limit - 1) // limit
-    })
-
-@voice_routes.route("/voice/<voice_id>", methods=["GET"])
+@voice_routes.route("/voice/recordings/<recording_id>", methods=["GET"])
 @token_required
-def get_voice_translation(voice_id):
-    claims = getattr(request, "user", {}) or {}
-    user_id = claims.get("user_id")
-    if not user_id:
-        return jsonify({"error": "Invalid token payload"}), 403
+def get_voice_recording(recording_id):
+    """Get a specific voice recording by ID."""
+    try:
+        claims = getattr(request, "user", {}) or {}
+        user_id = claims.get("user_id")
+        if not user_id:
+            return jsonify({"error": "Invalid token payload"}), 403
 
-    voice_translation = voice_translations.find_one({"_id": ObjectId(voice_id), "user_id": ObjectId(user_id)})
-    if not voice_translation:
-        return jsonify({"error": "Voice translation not found"}), 404
+        recording = voice_recordings.find_one({
+            "_id": ObjectId(recording_id),
+            "user_id": ObjectId(user_id)
+        })
 
-    voice_translation["_id"] = str(voice_translation["_id"])
-    if isinstance(voice_translation.get("user_id"), ObjectId):
-        voice_translation["user_id"] = str(voice_translation["user_id"])
-    if hasattr(voice_translation.get("timestamp"), "isoformat"):
-        voice_translation["timestamp"] = voice_translation["timestamp"].isoformat()
+        if not recording:
+            return jsonify({"error": "Recording not found"}), 404
 
-    return jsonify(voice_translation)
+        recording["_id"] = str(recording["_id"])
+        if isinstance(recording.get("user_id"), ObjectId):
+            recording["user_id"] = str(recording["user_id"])
+        if hasattr(recording.get("timestamp"), "isoformat"):
+            recording["timestamp"] = recording["timestamp"].isoformat()
 
-@voice_routes.route("/voice/<voice_id>", methods=["DELETE"])
+        return jsonify(recording), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@voice_routes.route("/voice/recordings/<recording_id>/audio", methods=["GET"])
 @token_required
-def delete_voice_translation(voice_id):
-    claims = getattr(request, "user", {}) or {}
-    user_id = claims.get("user_id")
-    if not user_id:
-        return jsonify({"error": "Invalid token payload"}), 403
+def get_voice_audio(recording_id):
+    """Get audio data for playback."""
+    try:
+        claims = getattr(request, "user", {}) or {}
+        user_id = claims.get("user_id")
+        if not user_id:
+            return jsonify({"error": "Invalid token payload"}), 403
 
-    # Get voice translation to delete audio file
-    voice_translation = voice_translations.find_one({"_id": ObjectId(voice_id), "user_id": ObjectId(user_id)})
-    if not voice_translation:
-        return jsonify({"error": "Voice translation not found"}), 404
+        recording = voice_recordings.find_one({
+            "_id": ObjectId(recording_id),
+            "user_id": ObjectId(user_id)
+        })
 
-    # Delete audio file
-    audio_path = voice_translation.get("audio_path")
-    if audio_path and os.path.exists(audio_path):
+        if not recording:
+            return jsonify({"error": "Recording not found"}), 404
+
+        audio_data = recording.get("audio_data")
+        if not audio_data:
+            return jsonify({"error": "Audio data not found"}), 404
+
+        # Convert base64 to audio bytes
+        import base64
         try:
-            os.remove(audio_path)
-        except:
-            pass  # Continue even if file deletion fails
+            audio_bytes = base64.b64decode(audio_data)
+        except Exception as e:
+            return jsonify({"error": f"Invalid audio data format: {str(e)}"}), 400
 
-    # Delete from database
-    res = voice_translations.delete_one({"_id": ObjectId(voice_id), "user_id": ObjectId(user_id)})
-    if res.deleted_count == 0:
-        return jsonify({"error": "Not found"}), 404
+        # Return audio data with proper headers
+        from flask import make_response
+        response = make_response(audio_bytes)
+        response.headers['Content-Type'] = 'audio/wav'  # Assuming WAV format
+        response.headers['Content-Disposition'] = f'attachment; filename=recording_{recording_id}.wav'
+        
+        return response
 
-    # Also delete from regular translations if it exists
-    translations.delete_many({"voice_translation_id": ObjectId(voice_id)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-    return jsonify({"message": "Voice translation deleted successfully"})
-
-@voice_routes.route("/voice", methods=["DELETE"])
+@voice_routes.route("/voice/recordings/<recording_id>/audio-data", methods=["GET"])
 @token_required
-def clear_voice_history():
-    claims = getattr(request, "user", {}) or {}
-    user_id = claims.get("user_id")
-    if not user_id:
-        return jsonify({"error": "Invalid token payload"}), 403
+def get_voice_audio_data(recording_id):
+    """Get audio data as base64 for frontend playback."""
+    try:
+        claims = getattr(request, "user", {}) or {}
+        user_id = claims.get("user_id")
+        if not user_id:
+            return jsonify({"error": "Invalid token payload"}), 403
 
-    # Get all voice translations for this user
-    user_voice_translations = list(voice_translations.find({"user_id": ObjectId(user_id)}))
-    
-    # Delete audio files
-    for trans in user_voice_translations:
-        audio_path = trans.get("audio_path")
-        if audio_path and os.path.exists(audio_path):
-            try:
-                os.remove(audio_path)
-            except:
-                pass
+        recording = voice_recordings.find_one({
+            "_id": ObjectId(recording_id),
+            "user_id": ObjectId(user_id)
+        })
 
-    # Delete from database
-    voice_translations.delete_many({"user_id": ObjectId(user_id)})
-    
-    # Also delete from regular translations
-    translations.delete_many({"user_id": ObjectId(user_id), "source": "voice"})
+        if not recording:
+            return jsonify({"error": "Recording not found"}), 404
 
-    return jsonify({"message": "Voice history cleared successfully"})
+        audio_data = recording.get("audio_data")
+        if not audio_data:
+            return jsonify({"error": "Audio data not found"}), 404
 
-@voice_routes.route("/voice/<voice_id>/audio", methods=["GET"])
+        return jsonify({
+            "audio_data": audio_data,
+            "recording_id": recording_id,
+            "duration": recording.get("duration", 0),
+            "language": recording.get("language", "Somali"),
+            "transcription": recording.get("transcription", ""),
+            "timestamp": recording.get("timestamp").isoformat() if hasattr(recording.get("timestamp"), "isoformat") else str(recording.get("timestamp"))
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@voice_routes.route("/voice/recordings/<recording_id>", methods=["DELETE"])
 @token_required
-def get_audio_file(voice_id):
-    claims = getattr(request, "user", {}) or {}
-    user_id = claims.get("user_id")
-    if not user_id:
-        return jsonify({"error": "Invalid token payload"}), 403
+def delete_voice_recording(recording_id):
+    """Delete a voice recording."""
+    try:
+        claims = getattr(request, "user", {}) or {}
+        user_id = claims.get("user_id")
+        if not user_id:
+            return jsonify({"error": "Invalid token payload"}), 403
 
-    voice_translation = voice_translations.find_one({"_id": ObjectId(voice_id), "user_id": ObjectId(user_id)})
-    if not voice_translation:
-        return jsonify({"error": "Voice translation not found"}), 404
+        result = voice_recordings.delete_one({
+            "_id": ObjectId(recording_id),
+            "user_id": ObjectId(user_id)
+        })
 
-    audio_path = voice_translation.get("audio_path")
-    if not audio_path or not os.path.exists(audio_path):
-        return jsonify({"error": "Audio file not found"}), 404
+        if result.deleted_count == 0:
+            return jsonify({"error": "Recording not found"}), 404
 
-    # Return audio file
-    from flask import send_file
-    return send_file(audio_path, as_attachment=True, download_name=voice_translation.get("audio_filename", "audio.wav"))
+        return jsonify({"message": "Voice recording deleted successfully"}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@voice_routes.route("/voice/recordings/<recording_id>/favorite", methods=["POST"])
+@token_required
+def toggle_favorite_recording(recording_id):
+    """Toggle favorite status of a voice recording."""
+    try:
+        claims = getattr(request, "user", {}) or {}
+        user_id = claims.get("user_id")
+        if not user_id:
+            return jsonify({"error": "Invalid token payload"}), 403
+
+        recording = voice_recordings.find_one({
+            "_id": ObjectId(recording_id),
+            "user_id": ObjectId(user_id)
+        })
+
+        if not recording:
+            return jsonify({"error": "Recording not found"}), 404
+
+        new_favorite_status = not recording.get("is_favorite", False)
+        
+        result = voice_recordings.update_one(
+            {"_id": ObjectId(recording_id), "user_id": ObjectId(user_id)},
+            {"$set": {"is_favorite": new_favorite_status}}
+        )
+
+        if result.modified_count == 0:
+            return jsonify({"error": "Failed to update recording"}), 500
+
+        return jsonify({
+            "message": "Favorite status updated",
+            "is_favorite": new_favorite_status
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@voice_routes.route("/voice/favorites", methods=["GET"])
+@token_required
+def get_favorite_recordings():
+    """Get all favorite voice recordings for the authenticated user."""
+    try:
+        claims = getattr(request, "user", {}) or {}
+        user_id = claims.get("user_id")
+        if not user_id:
+            return jsonify({"error": "Invalid token payload"}), 403
+
+        recordings = list(voice_recordings.find({
+            "user_id": ObjectId(user_id),
+            "is_favorite": True
+        }).sort("timestamp", -1))
+        
+        for recording in recordings:
+            recording["_id"] = str(recording["_id"])
+            if isinstance(recording.get("user_id"), ObjectId):
+                recording["user_id"] = str(recording["user_id"])
+            if hasattr(recording.get("timestamp"), "isoformat"):
+                recording["timestamp"] = recording["timestamp"].isoformat()
+
+        return jsonify(recordings), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@voice_routes.route("/voice/recordings", methods=["DELETE"])
+@token_required
+def clear_all_recordings():
+    """Delete all voice recordings for the authenticated user."""
+    try:
+        claims = getattr(request, "user", {}) or {}
+        user_id = claims.get("user_id")
+        if not user_id:
+            return jsonify({"error": "Invalid token payload"}), 403
+
+        result = voice_recordings.delete_many({"user_id": ObjectId(user_id)})
+        
+        return jsonify({
+            "message": f"Deleted {result.deleted_count} recordings"
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
