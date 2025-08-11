@@ -11,17 +11,27 @@ from flask_bcrypt import Bcrypt
 import jwt
 from routes.auth_routes import auth_routes 
 from routes.user_routes import user_routes
+from routes.favorites_routes import favorites_routes
+from routes.history_routes import history_routes
+from routes.voice_routes import voice_routes
+from routes.language_routes import language_routes
+from routes.admin_routes import admin_routes
 
 
 load_dotenv()
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='static')
 CORS(app)
 bcrypt = Bcrypt(app)
 
 
 app.register_blueprint(auth_routes)
 app.register_blueprint(user_routes)
+app.register_blueprint(favorites_routes)
+app.register_blueprint(history_routes)
+app.register_blueprint(voice_routes)
+app.register_blueprint(language_routes)
+app.register_blueprint(admin_routes)
 #MongoDB setup
 mongo_uri = "mongodb://localhost:27017/"
 client = MongoClient(mongo_uri)
@@ -38,6 +48,14 @@ model = TFMarianMTModel.from_pretrained(model_dir, local_files_only=True)
 def home():
     return "Somali Translator API waa socda oo MongoDB waa ku xiran!"
 
+@app.route("/voice-demo")
+def voice_demo():
+    return app.send_static_file('voice-recorder-demo.html')
+
+@app.route("/language-demo")
+def language_demo():
+    return app.send_static_file('language-detection-demo.html')
+
 @app.route("/translate", methods=["POST"])
 def translate():
     data = request.get_json()
@@ -46,7 +64,38 @@ def translate():
     if not input_text.strip():
         return jsonify({"translation": "No input text provided."})
 
+    # Check if user is authenticated
+    user_id = None
+    auth_header = request.headers.get('Authorization')
+    if auth_header and auth_header.startswith('Bearer '):
+        try:
+            token = auth_header.split(' ')[1]
+            from middlewares.auth_decorator import decode_token
+            claims = decode_token(token)
+            user_id = claims.get("user_id")
+        except:
+            pass  # Continue without user_id if token is invalid
+
     try:
+        # Detect language of input text
+        from routes.language_detection import somali_detector
+        language_detection = somali_detector.detect_text_language(input_text)
+        detected_language = language_detection['language']
+        language_confidence = language_detection['confidence']
+        detection_method = language_detection['method']
+
+        # Check if the text is Somali - if not, return error message
+        if detected_language != 'so' or language_confidence < 0.2:
+            return jsonify({
+                "error": "Qoraalka aad galiyay ma aha afka Soomaaliga. Fadlan gali qoraal Soomaali ah.",
+                "language_detection": {
+                    "detected_language": detected_language,
+                    "language_confidence": language_confidence,
+                    "detection_method": detection_method,
+                    "is_somali": False
+                },
+            })
+
         inputs = tokenizer(input_text, return_tensors="tf", padding=True, truncation=True)
         outputs = model.generate(**inputs)
         translated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
@@ -59,20 +108,35 @@ def translate():
             "original_text": input_text,
             "translated_text": translated_text,
             "timestamp": datetime.now(somalia_tz).isoformat(),
-            "is_favorite": False
+            "is_favorite": False,
+            "detected_language": detected_language,
+            "language_confidence": language_confidence,
+            "detection_method": detection_method
         }
+        
+        # Add user_id if authenticated
+        if user_id:
+            from bson import ObjectId
+            new_entry["user_id"] = ObjectId(user_id)
+            
         result = translations.insert_one(new_entry)
         new_entry["_id"] = str(result.inserted_id)
 
-        # return jsonify({"translation": translated_text})
         return jsonify({
-    "translated_text": translated_text,
-    "id": str(result.inserted_id)  # Return MongoDB document ID
-})
+            "translated_text": translated_text,
+            "id": str(result.inserted_id),  # Return MongoDB document ID
+            "language_detection": {
+                "detected_language": detected_language,
+                "language_confidence": language_confidence,
+                "detection_method": detection_method,
+                "is_somali": detected_language == 'so'
+            }
+        })
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# Legacy endpoints for backward compatibility (public access)
 @app.route("/history", methods=["GET"])
 def get_history():
     docs = list(translations.find().sort("timestamp", -1))
@@ -80,17 +144,6 @@ def get_history():
         doc["_id"] = str(doc["_id"])
         doc["timestamp"] = str(doc["timestamp"])  # no isoformat needed
     return jsonify(docs)
-
-
-@app.route("/favorite", methods=["POST"])
-def mark_favorite():
-    data = request.get_json()
-    entry_id = data.get("id")
-    from bson import ObjectId
-    result = translations.update_one({"_id": ObjectId(entry_id)}, {"$set": {"is_favorite": True}})
-    if result.modified_count == 0:
-        return jsonify({"error": "Not found"}), 404
-    return jsonify({"message": "Marked as favorite"})
 
 @app.route("/favorites", methods=["GET"])
 def get_favorites():
@@ -100,31 +153,9 @@ def get_favorites():
         doc["timestamp"] = doc["timestamp"]
     return jsonify(docs)
 
-@app.route("/history/<entry_id>", methods=["DELETE"])
-def delete_history(entry_id):
-    from bson import ObjectId
-    result = translations.delete_one({"_id": ObjectId(entry_id)})
-    if result.deleted_count == 0:
-        return jsonify({"error": "Not found"}), 404
-    return jsonify({"message": "Deleted"})
 
-@app.route("/history", methods=["DELETE"])
-def delete_all_history():
-    translations.delete_many({})
-    return jsonify({"message": "All history deleted"})
 
-@app.route("/favorites", methods=["DELETE"])
-def delete_all_favorites():
-    translations.update_many({"is_favorite": True}, {"$set": {"is_favorite": False}})
-    return jsonify({"message": "All favorites unmarked"})
 
-@app.route("/favorites/<entry_id>", methods=["DELETE"])
-def delete_favorite(entry_id):
-    from bson import ObjectId
-    result = translations.update_one({"_id": ObjectId(entry_id)}, {"$set": {"is_favorite": False}})
-    if result.matched_count == 0:
-        return jsonify({"error": "Not found"}), 404
-    return jsonify({"message": "Removed from favorites"})
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)

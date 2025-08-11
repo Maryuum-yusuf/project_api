@@ -5,6 +5,12 @@ import os
 
 SECRET_KEY = os.getenv("SECRET_KEY", "sir_qarsoon")
 
+def decode_token(token):
+    """Decode JWT token and return claims"""
+    if token.startswith('Bearer '):
+        token = token.split(' ')[1]
+    return jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+
 def token_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -13,6 +19,8 @@ def token_required(f):
             return jsonify({"error": "Token is missing"}), 403
 
         try:
+            if token.startswith('Bearer '):
+                token = token.split(' ')[1]
             decoded = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
             request.user = decoded
         except jwt.ExpiredSignatureError:
@@ -26,6 +34,20 @@ def token_required(f):
 def admin_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
+        token = request.headers.get("Authorization")
+        if not token:
+            return jsonify({"error": "Token is missing"}), 403
+
+        try:
+            if token.startswith('Bearer '):
+                token = token.split(' ')[1]
+            decoded = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+            request.user = decoded
+        except jwt.ExpiredSignatureError:
+            return jsonify({"error": "Token expired"}), 403
+        except jwt.InvalidTokenError:
+            return jsonify({"error": "Invalid token"}), 403
+
         if request.user.get("role") != "admin":
             return jsonify({"error": "Admin access only"}), 403
         return f(*args, **kwargs)
