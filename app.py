@@ -87,7 +87,7 @@ def translate():
         # Check if the text is Somali - if not, return error message
         if detected_language != 'so' or language_confidence < 0.2:
             return jsonify({
-                "error": "Qoraalka aad galiyay ma aha afka Soomaaliga. Fadlan gali qoraal Soomaali ah.",
+                "error": "Qoraalka aad galisay ma aha afka Soomaaliga. Fadlan gali qoraal Soomaali ah.",
                 "language_detection": {
                     "detected_language": detected_language,
                     "language_confidence": language_confidence,

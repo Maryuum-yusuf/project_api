@@ -5,6 +5,8 @@ from datetime import datetime, timedelta
 from middlewares.auth_decorator import admin_required
 import pytz
 from flask import make_response
+import calendar
+
 client = MongoClient("mongodb://localhost:27017/")
 db = client["somali_translator_db"]
 users = db["users"]
@@ -16,6 +18,7 @@ admin_routes = Blueprint("admin_routes", __name__)
 
 # Dashboard Analytics
 @admin_routes.route("/admin/dashboard", methods=["GET"])
+@admin_required
 def get_dashboard_stats():
     somalia_tz = pytz.timezone('Africa/Mogadishu')
     now = datetime.now(somalia_tz)
@@ -191,9 +194,404 @@ def get_dashboard_stats():
         "top_users_week": get_user_details(top_users_week)
     })
 
+# Comprehensive Reporting System
+@admin_routes.route("/admin/reports/translations", methods=["GET"])
+@admin_required
+def get_translations_report():
+    """Get detailed translations report with date filtering"""
+    
+    # Get query parameters
+    start_date = request.args.get("start_date")
+    end_date = request.args.get("end_date")
+    year = request.args.get("year")
+    month = request.args.get("month")
+    page = int(request.args.get("page", 1))
+    limit = int(request.args.get("limit", 50))
+    skip = (page - 1) * limit
+    
+    somalia_tz = pytz.timezone('Africa/Mogadishu')
+    now = datetime.now(somalia_tz)
+    
+    # Build date filter
+    date_filter = {}
+    
+    if start_date and end_date:
+        # Custom date range
+        try:
+            start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+            end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+            date_filter = {
+                "timestamp": {
+                    "$gte": start_dt.isoformat(),
+                    "$lte": end_dt.isoformat()
+                }
+            }
+        except ValueError:
+            return jsonify({"error": "Invalid date format. Use YYYY-MM-DD"}), 400
+    
+    elif year and month:
+        # Specific year and month
+        try:
+            year = int(year)
+            month = int(month)
+            start_dt = datetime(year, month, 1, tzinfo=somalia_tz)
+            if month == 12:
+                end_dt = datetime(year + 1, 1, 1, tzinfo=somalia_tz)
+            else:
+                end_dt = datetime(year, month + 1, 1, tzinfo=somalia_tz)
+            date_filter = {
+                "timestamp": {
+                    "$gte": start_dt.isoformat(),
+                    "$lt": end_dt.isoformat()
+                }
+            }
+        except ValueError:
+            return jsonify({"error": "Invalid year or month"}), 400
+    
+    elif year:
+        # Specific year
+        try:
+            year = int(year)
+            start_dt = datetime(year, 1, 1, tzinfo=somalia_tz)
+            end_dt = datetime(year + 1, 1, 1, tzinfo=somalia_tz)
+            date_filter = {
+                "timestamp": {
+                    "$gte": start_dt.isoformat(),
+                    "$lt": end_dt.isoformat()
+                }
+            }
+        except ValueError:
+            return jsonify({"error": "Invalid year"}), 400
+    
+    else:
+        # Default: current month
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        if now.month == 12:
+            next_month = now.replace(year=now.year + 1, month=1, day=1)
+        else:
+            next_month = now.replace(month=now.month + 1, day=1)
+        
+        date_filter = {
+            "timestamp": {
+                "$gte": month_start.isoformat(),
+                "$lt": next_month.isoformat()
+            }
+        }
+    
+    # Get translations with filter
+    total_translations = translations.count_documents(date_filter)
+    translations_list = list(translations.find(date_filter).skip(skip).limit(limit).sort("timestamp", -1))
+    
+    # Process translations and get user details
+    processed_translations = []
+    for translation in translations_list:
+        user_id = translation.get("user_id")
+        user_info = None
+        
+        if user_id:
+            try:
+                if isinstance(user_id, ObjectId):
+                    user_info = users.find_one({"_id": user_id})
+                elif isinstance(user_id, str):
+                    user_info = users.find_one({"_id": ObjectId(user_id)})
+            except:
+                user_info = None
+        
+        user_name = "Guest User"
+        user_email = ""
+        
+        if user_info:
+            user_name = user_info.get("full_name", "")
+            user_email = user_info.get("email", "")
+            if not user_name and user_email:
+                user_name = user_email.split('@')[0]
+        
+        processed_translations.append({
+            "_id": str(translation["_id"]),
+            "user_name": user_name,
+            "user_email": user_email,
+            "timestamp": translation.get("timestamp", ""),
+            "original_text": translation.get("original_text", ""),
+            "translated_text": translation.get("translated_text", ""),
+            "source_language": translation.get("source_language", "Unknown"),
+            "target_language": translation.get("target_language", "Unknown")
+        })
+    
+    # Calculate statistics
+    unique_users = len(set(
+        str(translation.get("user_id")) 
+        for translation in translations.find(date_filter)
+    ))
+    
+    # Language pair statistics
+    pipeline = [
+        {"$match": date_filter},
+        {"$group": {
+            "_id": {
+                "source": "$source_language",
+                "target": "$target_language"
+            },
+            "count": {"$sum": 1}
+        }},
+        {"$sort": {"count": -1}}
+    ]
+    language_stats = list(translations.aggregate(pipeline))
+    
+    return jsonify({
+        "translations": processed_translations,
+        "total": total_translations,
+        "page": page,
+        "limit": limit,
+        "pages": (total_translations + limit - 1) // limit,
+        "statistics": {
+            "total_translations": total_translations,
+            "unique_users": unique_users,
+            "language_pairs": language_stats
+        },
+        "date_filter": {
+            "start_date": start_date,
+            "end_date": end_date,
+            "year": year,
+            "month": month
+        }
+    })
+
+@admin_routes.route("/admin/reports/translations/export", methods=["GET"])
+@admin_required
+def export_translations_report():
+    """Export translations report as CSV"""
+    
+    # Get query parameters
+    start_date = request.args.get("start_date")
+    end_date = request.args.get("end_date")
+    year = request.args.get("year")
+    month = request.args.get("month")
+    
+    somalia_tz = pytz.timezone('Africa/Mogadishu')
+    now = datetime.now(somalia_tz)
+    
+    # Build date filter (same logic as above)
+    date_filter = {}
+    
+    if start_date and end_date:
+        try:
+            start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+            end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+            date_filter = {
+                "timestamp": {
+                    "$gte": start_dt.isoformat(),
+                    "$lte": end_dt.isoformat()
+                }
+            }
+        except ValueError:
+            return jsonify({"error": "Invalid date format"}), 400
+    
+    elif year and month:
+        try:
+            year = int(year)
+            month = int(month)
+            start_dt = datetime(year, month, 1, tzinfo=somalia_tz)
+            if month == 12:
+                end_dt = datetime(year + 1, 1, 1, tzinfo=somalia_tz)
+            else:
+                end_dt = datetime(year, month + 1, 1, tzinfo=somalia_tz)
+            date_filter = {
+                "timestamp": {
+                    "$gte": start_dt.isoformat(),
+                    "$lt": end_dt.isoformat()
+                }
+            }
+        except ValueError:
+            return jsonify({"error": "Invalid year or month"}), 400
+    
+    elif year:
+        try:
+            year = int(year)
+            start_dt = datetime(year, 1, 1, tzinfo=somalia_tz)
+            end_dt = datetime(year + 1, 1, 1, tzinfo=somalia_tz)
+            date_filter = {
+                "timestamp": {
+                    "$gte": start_dt.isoformat(),
+                    "$lt": end_dt.isoformat()
+                }
+            }
+        except ValueError:
+            return jsonify({"error": "Invalid year"}), 400
+    
+    else:
+        # Default: current month
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        if now.month == 12:
+            next_month = now.replace(year=now.year + 1, month=1, day=1)
+        else:
+            next_month = now.replace(month=now.month + 1, day=1)
+        
+        date_filter = {
+            "timestamp": {
+                "$gte": month_start.isoformat(),
+                "$lt": next_month.isoformat()
+            }
+        }
+    
+    # Get all translations for the period
+    all_translations = list(translations.find(date_filter).sort("timestamp", -1))
+    
+    # Create CSV content
+    csv_content = "User Name,User Email,Timestamp,Original Text,Translated Text,Source Language,Target Language\n"
+    
+    for translation in all_translations:
+        user_id = translation.get("user_id")
+        user_info = None
+        
+        if user_id:
+            try:
+                if isinstance(user_id, ObjectId):
+                    user_info = users.find_one({"_id": user_id})
+                elif isinstance(user_id, str):
+                    user_info = users.find_one({"_id": ObjectId(user_id)})
+            except:
+                user_info = None
+        
+        user_name = "Guest User"
+        user_email = ""
+        
+        if user_info:
+            user_name = user_info.get("full_name", "").replace('"', '""')
+            user_email = user_info.get("email", "").replace('"', '""')
+            if not user_name and user_email:
+                user_name = user_email.split('@')[0].replace('"', '""')
+        
+        timestamp = translation.get("timestamp", "").replace('"', '""')
+        original_text = translation.get("original_text", "").replace('"', '""')
+        translated_text = translation.get("translated_text", "").replace('"', '""')
+        source_lang = translation.get("source_language", "Unknown").replace('"', '""')
+        target_lang = translation.get("target_language", "Unknown").replace('"', '""')
+        
+        csv_content += f'"{user_name}","{user_email}","{timestamp}","{original_text}","{translated_text}","{source_lang}","{target_lang}"\n'
+    
+    # Return CSV file
+    response = make_response(csv_content)
+    response.headers['Content-Type'] = 'text/csv'
+    
+    # Generate filename based on filter
+    if year and month:
+        filename = f"translations_report_{year}_{month:02d}.csv"
+    elif year:
+        filename = f"translations_report_{year}.csv"
+    elif start_date and end_date:
+        filename = f"translations_report_{start_date}_to_{end_date}.csv"
+    else:
+        filename = f"translations_report_{now.strftime('%Y_%m')}.csv"
+    
+    response.headers['Content-Disposition'] = f'attachment; filename={filename}'
+    
+    return response
+
+@admin_routes.route("/admin/reports/summary", methods=["GET"])
+@admin_required
+def get_reports_summary():
+    """Get summary statistics for different time periods"""
+    
+    somalia_tz = pytz.timezone('Africa/Mogadishu')
+    now = datetime.now(somalia_tz)
+    
+    # Current year statistics
+    year_start = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+    year_end = year_start.replace(year=year_start.year + 1)
+    
+    year_translations = translations.count_documents({
+        "timestamp": {
+            "$gte": year_start.isoformat(),
+            "$lt": year_end.isoformat()
+        }
+    })
+    
+    year_users = len(set(
+        str(translation.get("user_id")) 
+        for translation in translations.find({
+            "timestamp": {
+                "$gte": year_start.isoformat(),
+                "$lt": year_end.isoformat()
+            }
+        })
+    ))
+    
+    # Monthly statistics for current year
+    monthly_stats = []
+    for month in range(1, 13):
+        month_start = year_start.replace(month=month)
+        if month == 12:
+            month_end = year_start.replace(year=year_start.year + 1, month=1)
+        else:
+            month_end = year_start.replace(month=month + 1)
+        
+        month_translations = translations.count_documents({
+            "timestamp": {
+                "$gte": month_start.isoformat(),
+                "$lt": month_end.isoformat()
+            }
+        })
+        
+        month_users = len(set(
+            str(translation.get("user_id")) 
+            for translation in translations.find({
+                "timestamp": {
+                    "$gte": month_start.isoformat(),
+                    "$lt": month_end.isoformat()
+                }
+            })
+        ))
+        
+        monthly_stats.append({
+            "month": month,
+            "month_name": calendar.month_name[month],
+            "translations": month_translations,
+            "users": month_users
+        })
+    
+    # Last 5 years summary
+    yearly_stats = []
+    for year_offset in range(5):
+        year = now.year - year_offset
+        year_start = now.replace(year=year, month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        year_end = year_start.replace(year=year + 1)
+        
+        year_translations = translations.count_documents({
+            "timestamp": {
+                "$gte": year_start.isoformat(),
+                "$lt": year_end.isoformat()
+            }
+        })
+        
+        year_users = len(set(
+            str(translation.get("user_id")) 
+            for translation in translations.find({
+                "timestamp": {
+                    "$gte": year_start.isoformat(),
+                    "$lt": year_end.isoformat()
+                }
+            })
+        ))
+        
+        yearly_stats.append({
+            "year": year,
+            "translations": year_translations,
+            "users": year_users
+        })
+    
+    return jsonify({
+        "current_year": {
+            "year": now.year,
+            "translations": year_translations,
+            "users": year_users
+        },
+        "monthly_stats": monthly_stats,
+        "yearly_stats": yearly_stats
+    })
+
 # User Management
 @admin_routes.route("/admin/users", methods=["GET"])
-
+@admin_required
 def get_all_users_admin():
     page = int(request.args.get("page", 1))
     limit = int(request.args.get("limit", 10))
@@ -226,7 +624,7 @@ def get_all_users_admin():
     })
 
 @admin_routes.route("/admin/users/<user_id>/suspend", methods=["POST"])
-
+@admin_required
 def suspend_user(user_id):
     result = users.update_one(
         {"_id": ObjectId(user_id)}, 
@@ -237,7 +635,7 @@ def suspend_user(user_id):
     return jsonify({"message": "User suspended successfully"})
 
 @admin_routes.route("/admin/users/<user_id>/unsuspend", methods=["POST"])
-
+@admin_required
 def unsuspend_user(user_id):
     result = users.update_one(
         {"_id": ObjectId(user_id)}, 
@@ -248,7 +646,7 @@ def unsuspend_user(user_id):
     return jsonify({"message": "User unsuspended successfully"})
 
 @admin_routes.route("/admin/users/<user_id>/stats", methods=["GET"])
-
+@admin_required
 def get_user_stats(user_id):
     user = users.find_one({"_id": ObjectId(user_id)})
     if not user:
@@ -300,7 +698,7 @@ def get_user_stats(user_id):
 
 # Analytics and Reports
 @admin_routes.route("/admin/analytics", methods=["GET"])
-
+@admin_required
 def get_analytics():
     somalia_tz = pytz.timezone('Africa/Mogadishu')
     now = datetime.now(somalia_tz)
@@ -408,6 +806,7 @@ def get_analytics():
     })
 
 @admin_routes.route("/admin/analytics/export", methods=["GET"])
+@admin_required
 def export_analytics():
     try:
         somalia_tz = pytz.timezone('Africa/Mogadishu')
@@ -538,7 +937,7 @@ Usage Patterns (Last 7 Days),Date,Translations
         return jsonify({"error": f"Analytics export failed: {str(e)}"}), 500
 
 @admin_routes.route("/admin/reports/export", methods=["GET"])
-
+@admin_required
 def export_reports():
     # This endpoint can be used to export data in CSV/Excel format
     # For now, returning JSON data that can be processed by frontend
@@ -565,9 +964,8 @@ def export_reports():
     
     return jsonify(export_data)
 
-
-
 @admin_routes.route("/admin/users/export", methods=["GET"])
+@admin_required
 def export_users():
     try:
         # Get all users
